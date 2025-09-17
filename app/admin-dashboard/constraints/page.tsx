@@ -1,0 +1,346 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Database, 
+  CheckCircle, 
+  XCircle, 
+  AlertTriangle,
+  RefreshCw,
+  Table,
+  Key,
+  Shield,
+  Lock
+} from 'lucide-react';
+import { AdminBreadcrumbs } from '@/components/layout/AdminBreadcrumbs';
+import { useToast } from '@/hooks/use-toast';
+import { adminApi } from '@/lib/api';
+import { DatabaseConstraint } from '@/lib/types';
+
+interface Constraint {
+  id: string;
+  name: string;
+  table: string;
+  type: 'PRIMARY_KEY' | 'FOREIGN_KEY' | 'UNIQUE' | 'CHECK' | 'NOT_NULL';
+  columns: string[];
+  referencedTable?: string;
+  referencedColumns?: string[];
+  isValid: boolean;
+  issues?: string[];
+  lastChecked: Date;
+}
+
+interface ConstraintGroup {
+  table: string;
+  constraints: Constraint[];
+  isValid: boolean;
+  issueCount: number;
+}
+
+export default function ConstraintVisualizationPage() {
+  const { toast } = useToast();
+  const [constraints, setConstraints] = useState<ConstraintGroup[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+
+  const loadConstraints = async () => {
+    try {
+      setLoading(true);
+      // Call the real API endpoint
+      const result = await adminApi.getConstraints();
+      
+      if (result.success && result.data) {
+        // Transform the API data into the format expected by the UI
+        const groupedConstraints: Record<string, ConstraintGroup> = {};
+        
+        result.data.forEach((constraint: DatabaseConstraint) => {
+          if (!groupedConstraints[constraint.table]) {
+            groupedConstraints[constraint.table] = {
+              table: constraint.table,
+              constraints: [],
+              isValid: true,
+              issueCount: 0
+            };
+          }
+          
+          const constraintType = constraint.constraintType as 'PRIMARY_KEY' | 'FOREIGN_KEY' | 'UNIQUE' | 'CHECK' | 'NOT_NULL';
+          
+          groupedConstraints[constraint.table].constraints.push({
+            id: `${constraint.table}_${constraint.column}_${constraint.constraintType}`,
+            name: `${constraint.table}_${constraint.column}_${constraint.constraintType}`,
+            table: constraint.table,
+            type: constraintType,
+            columns: [constraint.column],
+            isValid: constraint.status === 'OK',
+            lastChecked: new Date()
+          });
+          
+          if (constraint.status !== 'OK') {
+            groupedConstraints[constraint.table].isValid = false;
+            groupedConstraints[constraint.table].issueCount += 1;
+          }
+        });
+        
+        setConstraints(Object.values(groupedConstraints));
+      } else {
+        throw new Error(result.error || 'Failed to fetch database constraints');
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load database constraints",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getConstraintIcon = (type: string) => {
+    switch (type) {
+      case 'PRIMARY_KEY':
+        return <Key className="h-4 w-4" />;
+      case 'FOREIGN_KEY':
+        return <Shield className="h-4 w-4" />;
+      case 'UNIQUE':
+        return <CheckCircle className="h-4 w-4" />;
+      case 'CHECK':
+        return <AlertTriangle className="h-4 w-4" />;
+      case 'NOT_NULL':
+        return <Lock className="h-4 w-4" />;
+      default:
+        return <Database className="h-4 w-4" />;
+    }
+  };
+
+  const getConstraintColor = (type: string) => {
+    switch (type) {
+      case 'PRIMARY_KEY':
+        return 'bg-blue-100 text-blue-800';
+      case 'FOREIGN_KEY':
+        return 'bg-purple-100 text-purple-800';
+      case 'UNIQUE':
+        return 'bg-green-100 text-green-800';
+      case 'CHECK':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'NOT_NULL':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusIcon = (isValid: boolean) => {
+    return isValid ? 
+      <CheckCircle className="h-5 w-5 text-green-500" /> : 
+      <XCircle className="h-5 w-5 text-red-500" />;
+  };
+
+  useEffect(() => {
+    loadConstraints();
+  }, []);
+
+  const selectedGroup = selectedTable 
+    ? constraints.find(group => group.table === selectedTable)
+    : null;
+
+  return (
+    <div className="space-y-6">
+      <AdminBreadcrumbs />
+      <Card className="rounded-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            Database Constraint Visualization
+          </CardTitle>
+          <CardDescription>
+            Monitor and validate database integrity constraints
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <Button onClick={loadConstraints} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh Constraints
+              </Button>
+            </div>
+            
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                Valid
+              </div>
+              <div className="flex items-center gap-1">
+                <XCircle className="h-4 w-4 text-red-500" />
+                Issues
+              </div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => (
+                <Card key={i} className="cursor-pointer">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 bg-muted rounded animate-pulse"></div>
+                        <div>
+                          <div className="h-4 bg-muted rounded w-20 mb-1 animate-pulse"></div>
+                          <div className="h-3 bg-muted rounded w-16 animate-pulse"></div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 bg-muted rounded animate-pulse"></div>
+                        <div className="h-5 w-5 bg-muted rounded animate-pulse"></div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {constraints.map((group) => (
+                <Card 
+                  key={group.table}
+                  className={`cursor-pointer transition-colors hover:border-primary ${
+                    selectedTable === group.table ? 'border-primary ring-2 ring-primary/20' : ''
+                  }`}
+                  onClick={() => setSelectedTable(selectedTable === group.table ? null : group.table)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Table className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <div className="font-medium">{group.table}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {group.constraints.length} constraints
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {getStatusIcon(group.isValid)}
+                        {group.issueCount > 0 && (
+                          <Badge variant="destructive" className="text-xs">
+                            {group.issueCount}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {selectedGroup && (
+            <Card className="rounded-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Table className="h-5 w-5" />
+                  {selectedGroup.table} Constraints
+                </CardTitle>
+                <CardDescription>
+                  Detailed view of constraints for {selectedGroup.table} table
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {selectedGroup.constraints.map((constraint) => (
+                    <div 
+                      key={constraint.id}
+                      className={`p-3 rounded-md border ${
+                        constraint.isValid 
+                          ? 'border-green-200 bg-green-50' 
+                          : 'border-red-200 bg-red-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div className={constraint.isValid ? 'text-green-600' : 'text-red-600'}>
+                            {getConstraintIcon(constraint.type)}
+                          </div>
+                          <div>
+                            <div className="font-medium flex items-center gap-2">
+                              {constraint.name}
+                              <Badge className={getConstraintColor(constraint.type)}>
+                                {constraint.type.replace('_', ' ')}
+                              </Badge>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              Columns: {constraint.columns.join(', ')}
+                            </div>
+                            {constraint.referencedTable && (
+                              <div className="text-sm text-muted-foreground">
+                                References: {constraint.referencedTable} ({constraint.referencedColumns?.join(', ')})
+                              </div>
+                            )}
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Last checked: {constraint.lastChecked.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          {getStatusIcon(constraint.isValid)}
+                        </div>
+                      </div>
+                      
+                      {!constraint.isValid && constraint.issues && (
+                        <div className="mt-2 p-2 bg-red-100 rounded text-sm text-red-800">
+                          <div className="font-medium mb-1">Issues Found:</div>
+                          <ul className="list-disc list-inside space-y-1">
+                            {constraint.issues.map((issue, index) => (
+                              <li key={index}>{issue}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div className="p-3 bg-blue-50 rounded-md border border-blue-200">
+              <div className="flex items-center gap-2 font-medium text-blue-800">
+                <Key className="h-4 w-4" />
+                Primary Keys
+              </div>
+              <div className="text-blue-700 mt-1">
+                Ensure each row has a unique identifier
+              </div>
+            </div>
+            
+            <div className="p-3 bg-purple-50 rounded-md border border-purple-200">
+              <div className="flex items-center gap-2 font-medium text-purple-800">
+                <Shield className="h-4 w-4" />
+                Foreign Keys
+              </div>
+              <div className="text-purple-700 mt-1">
+                Maintain referential integrity between tables
+              </div>
+            </div>
+            
+            <div className="p-3 bg-green-50 rounded-md border border-green-200">
+              <div className="flex items-center gap-2 font-medium text-green-800">
+                <CheckCircle className="h-4 w-4" />
+                Unique Constraints
+              </div>
+              <div className="text-green-700 mt-1">
+                Prevent duplicate values in specified columns
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
